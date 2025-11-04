@@ -8,7 +8,7 @@ google-auth-httplib2==0.1.1
 google-api-python-client==2.108.0
 
 # LLM
-openai==1.3.7
+openai>=1.12.0,<2.0.0
 tiktoken==0.5.1
 
 # Data validation
