@@ -1,0 +1,72 @@
+version: '3.8'
+
+services:
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: llm-orchestra-api
+    ports:
+      - "8000:8000"
+    environment:
+      - PYTHONPATH=/app
+      - LOG_LEVEL=INFO
+    env_file:
+      - .env
+    volumes:
+      # Mount credentials directory for OAuth tokens
+      - ./credentials:/app/credentials
+      # Mount .env for development (optional)
+      - ./.env:/app/.env
+    restart: unless-stopped
+    healthcheck:
+      test: [ "CMD", "curl", "-f", "http://localhost:8000/health" ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    networks:
+      - llm-orchestra-network
+
+  # Optional: Redis for caching (for production)
+  redis:
+    image: redis:7-alpine
+    container_name: llm-orchestra-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    command: redis-server --appendonly yes
+    restart: unless-stopped
+    networks:
+      - llm-orchestra-network
+    profiles:
+      - production
+
+  # Optional: PostgreSQL (for production with pgvector)
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: llm-orchestra-postgres
+    environment:
+      POSTGRES_USER: llm_orchestra
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-changeme}
+      POSTGRES_DB: llm_orchestra
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    restart: unless-stopped
+    networks:
+      - llm-orchestra-network
+    profiles:
+      - production
+
+networks:
+  llm-orchestra-network:
+    driver: bridge
+
+volumes:
+  redis-data:
+  postgres-data:
+
+

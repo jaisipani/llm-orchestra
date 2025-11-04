@@ -24,6 +24,12 @@ pytz==2023.3
 click==8.1.7
 rich==13.7.0
 
+# API
+fastapi==0.104.1
+uvicorn[standard]==0.24.0
+python-multipart==0.0.6
+requests==2.31.0
+
 # Development
 pytest==7.4.3
 pytest-asyncio==0.21.1
