@@ -180,7 +180,10 @@ class Orchestrator:
             try:
                 result = self._execute_step(step)
                 context.add_result(i, result)
-                console.print(f"[green]?[/green] Step {i+1} completed")
+                if result is not None:
+                    console.print(f"[green]?[/green] Step {i+1} completed")
+                else:
+                    console.print(f"[yellow]?[/yellow] Step {i+1} completed (no result)")
             except Exception as e:
                 console.print(f"[red]?[/red] Step {i+1} failed: {e}")
                 context.mark_failed(i)
@@ -212,7 +215,9 @@ class Orchestrator:
             raise ValueError(f"Unknown service: {step.service}")
     
     def _execute_gmail_step(self, intent):
-        if intent.intent == "send_email":
+        intent_name = intent.intent.lower().replace('_', '')
+        
+        if intent_name in ["sendemail", "send"]:
             params = intent.parameters
             result = self.gmail_service.send_email(
                 to=params.get('to', params.get('emails', [])),
@@ -220,15 +225,21 @@ class Orchestrator:
                 body=params['body']
             )
             return result
-        elif intent.intent == "search_email":
+        elif intent_name in ["searchemail", "searchemails", "search"]:
             params = intent.parameters
             query = params.get('query', '')
+            if not query and 'is:unread' not in query:
+                query = "is:unread"
             if 'from' in params:
                 query += f" from:{params['from']}"
+            if 'emails' in params or 'email' in params:
+                email_list = params.get('emails') or [params.get('email')]
+                if email_list:
+                    email_filter = ' OR '.join([f"from:{email}" for email in email_list if email])
+                    query = f"{query} ({email_filter})" if query else f"({email_filter})"
             return self.gmail_service.search_emails(query, max_results=20)
         else:
-            self._handle_gmail_intent(intent)
-            return None
+            return self._handle_gmail_intent(intent)
     def _execute_calendar_step(self, intent):
         if intent.intent == "create_event":
             params = intent.parameters
@@ -253,12 +264,17 @@ class Orchestrator:
             self._handle_calendar_intent(intent)
             return None
     def _execute_drive_step(self, intent):
-        if intent.intent == "search_file":
+        intent_name = intent.intent.lower().replace('_', '')
+        
+        if intent_name in ["searchfile", "searchfiles", "searchdocument", "search"]:
+            query = intent.parameters.get('query', '')
+            if 'email' in query.lower() or 'doc' in query.lower():
+                query = query.replace('email', '').replace('doc', '').strip()
             return self.drive_service.search_files(
-                query=intent.parameters.get('query'),
+                query=query,
                 max_results=20
             )
-        elif intent.intent == "share_file":
+        elif intent_name in ["sharefile", "share"]:
             params = intent.parameters
             file_ids = []
             if 'file_id' in params:
@@ -280,8 +296,7 @@ class Orchestrator:
                     results.append(success)
             return results
         else:
-            self._handle_drive_intent(intent)
-            return None
+            return self._handle_drive_intent(intent)
     
     
     def _handle_gmail_intent(self, intent):
