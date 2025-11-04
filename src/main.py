@@ -1,6 +1,9 @@
 import sys
+import base64
+import re
 from typing import Optional
 from datetime import datetime
+from html import unescape
 
 import click
 from rich.console import Console
@@ -387,7 +390,102 @@ class Orchestrator:
         return emails
     
     def _handle_read_email(self, intent) -> None:
-        console.print("[yellow]?[/yellow] read_email not fully implemented yet")
+        params = intent.parameters
+        email_id = params.get('email_id')
+        
+        if not email_id:
+            console.print("[red]?[/red] Missing email_id parameter")
+            return
+        
+        try:
+            email = self.gmail_service.get_email(email_id)
+            if not email:
+                console.print("[red]?[/red] Email not found")
+                return
+            
+            headers = {h['name']: h['value'] for h in email['payload']['headers']}
+            subject = headers.get('Subject', 'No subject')
+            from_addr = headers.get('From', 'Unknown')
+            date = headers.get('Date', 'Unknown')
+            
+            body_text = self._extract_email_body(email['payload'])
+            
+            console.print(f"\n[bold cyan]Email Details:[/bold cyan]")
+            console.print(f"From: {from_addr}")
+            console.print(f"Subject: {subject}")
+            console.print(f"Date: {date}")
+            console.print(f"\n[bold cyan]Body:[/bold cyan]")
+            console.print(body_text[:500] + "..." if len(body_text) > 500 else body_text)
+            
+            if self.intent_parser.llm:
+                summary = self._summarize_email(subject, body_text)
+                console.print(f"\n[bold green]Summary:[/bold green]")
+                console.print(summary)
+            
+            if self.session:
+                self.session.references['last_email'] = email
+                self.session.references['last_read_email'] = email
+            
+        except Exception as e:
+            console.print(f"[red]?[/red] Error reading email: {e}")
+            logger.error(f"Error reading email: {e}", exc_info=True)
+    
+    def _extract_email_body(self, payload: dict) -> str:
+        body_text = ""
+        
+        if 'parts' in payload:
+            for part in payload['parts']:
+                mime_type = part.get('mimeType', '')
+                
+                if mime_type == 'text/plain':
+                    if 'body' in part and 'data' in part['body']:
+                        data = part['body']['data']
+                        body_text = base64.urlsafe_b64decode(data).decode('utf-8', errors='ignore')
+                        break
+                elif mime_type == 'text/html':
+                    if 'body' in part and 'data' in part['body']:
+                        data = part['body']['data']
+                        html_text = base64.urlsafe_b64decode(data).decode('utf-8', errors='ignore')
+                        clean_text = re.sub(r'<[^>]+>', '', html_text)
+                        body_text = unescape(clean_text)
+                        break
+                elif 'parts' in part:
+                    body_text = self._extract_email_body(part)
+                    if body_text:
+                        break
+        else:
+            if payload.get('mimeType') == 'text/plain' and 'body' in payload and 'data' in payload['body']:
+                import base64
+                data = payload['body']['data']
+                body_text = base64.urlsafe_b64decode(data).decode('utf-8', errors='ignore')
+        
+        return body_text.strip()
+    
+    def _summarize_email(self, subject: str, body: str) -> str:
+        """Generate email summary using LLM"""
+        try:
+            prompt = f"""Summarize this email in 2-3 sentences:
+
+Subject: {subject}
+
+Body:
+{body[:2000]}
+
+Provide a concise summary focusing on:
+- Main purpose/message
+- Key action items (if any)
+- Important details"""
+            
+            summary = self.intent_parser.llm.generate_text(
+                prompt=prompt,
+                max_tokens=150,
+                temperature=0.3
+            )
+            
+            return summary if summary else "Could not generate summary"
+        except Exception as e:
+            logger.error(f"Error generating summary: {e}")
+            return "Summary generation failed"
     def _handle_delete_email(self, intent) -> None:
         console.print("[yellow]?[/yellow] delete_email not fully implemented yet")
     
